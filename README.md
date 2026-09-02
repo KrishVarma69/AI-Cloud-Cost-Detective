@@ -165,5 +165,3 @@ s3:ListAllMyBuckets
 s3:GetBucketLifecycleConfiguration
 logs:DescribeLogGroups
 ```
-
-The AI-suggested fix commands are **write** operations — run them yourself after review. The tool never executes them.
