@@ -1,5 +1,11 @@
 # AI Cloud Cost Detective (AWS)
 
+![AWS](https://img.shields.io/badge/cloud-AWS-FF9900?logo=amazonwebservices&logoColor=white)
+![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB?logo=react&logoColor=black)
+![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![OpenAI](https://img.shields.io/badge/AI-OpenAI%20gpt--4o-412991?logo=openai&logoColor=white)
+
 An AI-powered tool that investigates AWS cloud costs automatically. It scans resources in an AWS account/region, pulls real spend data from AWS Cost Explorer, detects cost issues like over-provisioning and misconfigurations, and provides actionable suggestions with fixes.
 
 ## Tech Stack
