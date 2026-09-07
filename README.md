@@ -175,8 +175,10 @@ streams analyses owned by that user.
 
 Ready-to-apply policy documents and setup commands (single-account and
 multi-account / AWS Organizations) are in [`infra/iam/`](infra/iam/); ECS/Fargate
-task definitions are in [`infra/ecs/`](infra/ecs/). The credentials used by the
-backend need a read-only policy. A minimal set:
+task definitions are in [`infra/ecs/`](infra/ecs/); the GitHub Actions
+build-and-deploy pipeline and its OIDC setup are in [`infra/cicd/`](infra/cicd/)
+and [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). The
+credentials used by the backend need a read-only policy. A minimal set:
 
 ```
 tag:GetResources
