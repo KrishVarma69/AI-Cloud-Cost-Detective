@@ -53,6 +53,7 @@ export default function History() {
             <thead className="bg-[#0d131a] text-left text-xs uppercase tracking-wide text-gray-500">
               <tr>
                 <th className="px-4 py-2.5">Region</th>
+                <th className="px-4 py-2.5">Account</th>
                 <th className="px-4 py-2.5">Date</th>
                 <th className="px-4 py-2.5">Resources</th>
                 <th className="px-4 py-2.5">Issues</th>
@@ -76,6 +77,9 @@ export default function History() {
                         / {r.resource_group}
                       </span>
                     )}
+                  </td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-gray-400">
+                    {r.account_id || "—"}
                   </td>
                   <td className="px-4 py-2.5 text-gray-400">
                     {new Date(r.created_at).toLocaleString()}

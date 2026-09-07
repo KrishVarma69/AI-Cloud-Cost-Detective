@@ -2,15 +2,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError, WS_BASE, getToken } from "../api";
 import ProgressTracker from "../components/ProgressTracker";
-import type { ProgressMessage } from "../types";
+import type { Account, ProgressMessage } from "../types";
 
 export default function Dashboard() {
   const navigate = useNavigate();
 
   const [regions, setRegions] = useState<string[]>([]);
   const [groups, setGroups] = useState<string[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [region, setRegion] = useState("");
   const [group, setGroup] = useState("");
+  const [account, setAccount] = useState("");
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
   const [running, setRunning] = useState(false);
@@ -34,6 +36,12 @@ export default function Dashboard() {
       } catch {
         /* resource groups are optional */
       }
+      try {
+        const a = await api<{ accounts: Account[] }>("/api/accounts");
+        setAccounts(a.accounts);
+      } catch {
+        /* accounts picker is optional (single-account deploy) */
+      }
     })();
     return () => wsRef.current?.close();
   }, []);
@@ -49,7 +57,7 @@ export default function Dashboard() {
     try {
       const { analysis_id } = await api<{ analysis_id: string }>("/api/analyze", {
         method: "POST",
-        body: { region, resource_group: group || null },
+        body: { region, resource_group: group || null, account_id: account || null },
       });
 
       const token = getToken();
@@ -105,6 +113,23 @@ export default function Dashboard() {
       )}
 
       <div className="grid gap-4 rounded-lg border border-white/10 bg-[#0d131a] p-5 sm:grid-cols-2">
+        {accounts.length > 1 && (
+          <label className="block sm:col-span-2">
+            <span className="mb-1 block text-xs text-gray-400">AWS Account</span>
+            <select
+              value={account}
+              onChange={(e) => setAccount(e.target.value)}
+              className="w-full rounded-md border border-white/10 bg-[#111820] px-3 py-2 text-sm text-white outline-none focus:border-brand"
+            >
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
         <label className="block">
           <span className="mb-1 block text-xs text-gray-400">AWS Region</span>
           <select

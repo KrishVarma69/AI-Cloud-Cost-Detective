@@ -1,0 +1,15 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcsTasksAssume",
+      "Effect": "Allow",
+      "Principal": { "Service": "ecs-tasks.amazonaws.com" },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "StringEquals": { "aws:SourceAccount": "HUB_ACCOUNT_ID" },
+        "ArnLike": { "aws:SourceArn": "arn:aws:ecs:*:HUB_ACCOUNT_ID:*" }
+      }
+    }
+  ]
+}

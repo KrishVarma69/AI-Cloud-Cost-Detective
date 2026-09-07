@@ -1,0 +1,63 @@
+# Local / single-host stack for the AI Cloud Cost Detective.
+#
+#   1. cp backend/.env.example backend/.env   (fill in JWT_SECRET + LLM settings)
+#   2. Make AWS credentials reachable — either:
+#        - set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN in
+#          your shell (passed through below), or
+#        - uncomment the ~/.aws bind mount on the backend service.
+#   3. docker compose up --build
+#
+# Frontend:  http://localhost:8080
+# Backend:   http://localhost:8000  (docs at /docs)
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: costdetective
+      POSTGRES_PASSWORD: costdetective
+      POSTGRES_DB: costdetective
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U costdetective -d costdetective"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql://costdetective:costdetective@db:5432/costdetective
+      FRONTEND_ORIGIN: http://localhost:8080
+      # AWS credential env vars are passed through from your shell if set.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+    # volumes:
+    #   - ${HOME}/.aws:/home/appuser/.aws:ro   # mount your local AWS config/creds
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: http://localhost:8000
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:

@@ -7,7 +7,9 @@ whole scan.
 """
 from __future__ import annotations
 
+import contextvars
 import json
+import os
 import shutil
 import subprocess
 from datetime import date, datetime, timedelta, timezone
@@ -18,6 +20,75 @@ ProgressCb = Optional[Callable[[str, str, int], Any]]
 
 class AwsError(RuntimeError):
     """Raised for problems we can explain to the user (no CLI, no creds, ...)."""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cross-account support
+#
+# When a scan targets another AWS account, we assume `CROSS_ACCOUNT_ROLE_NAME`
+# in that account and expose the temporary credentials to every `aws` subprocess
+# via a ContextVar (set for the duration of one `scan_region` call).
+# ─────────────────────────────────────────────────────────────────────────────
+_aws_env: contextvars.ContextVar[Optional[dict[str, str]]] = contextvars.ContextVar(
+    "_aws_env", default=None
+)
+_cred_cache: dict[str, dict[str, Any]] = {}
+
+
+def list_accounts() -> list[dict[str, str]]:
+    """Accounts offered in the UI picker.
+
+    Configured via ``SCAN_ACCOUNTS`` — a comma-separated list of
+    ``<account-id>`` or ``<account-id>:<label>`` entries. The ambient-credential
+    account is always offered first as an empty id.
+    """
+    accounts = [{"id": "", "label": "This account (default credentials)"}]
+    for entry in os.getenv("SCAN_ACCOUNTS", "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        acct, _, label = entry.partition(":")
+        acct = acct.strip()
+        if acct:
+            accounts.append({"id": acct, "label": label.strip() or acct})
+    return accounts
+
+
+def _assume_role_env(account_id: str) -> dict[str, str]:
+    """Return AWS_* env vars for a role in ``account_id``, cached until expiry."""
+    now = datetime.now(timezone.utc)
+    cached = _cred_cache.get(account_id)
+    if cached and cached["expiry"] > now + timedelta(minutes=5):
+        return cached["env"]
+
+    try:
+        import boto3
+        from botocore.exceptions import BotoCoreError, ClientError
+    except ImportError as exc:  # pragma: no cover
+        raise AwsError(
+            "Cross-account scanning needs boto3. Add it to backend/requirements.txt."
+        ) from exc
+
+    role_name = os.getenv("CROSS_ACCOUNT_ROLE_NAME", "CostDetectiveScanRole")
+    role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
+    kwargs: dict[str, str] = {"RoleArn": role_arn, "RoleSessionName": "cost-detective"}
+    external_id = os.getenv("CROSS_ACCOUNT_EXTERNAL_ID")
+    if external_id:
+        kwargs["ExternalId"] = external_id
+
+    try:
+        resp = boto3.client("sts").assume_role(**kwargs)
+    except (BotoCoreError, ClientError) as exc:
+        raise AwsError(f"Could not assume {role_arn}: {exc}") from exc
+
+    creds = resp["Credentials"]
+    env = {
+        "AWS_ACCESS_KEY_ID": creds["AccessKeyId"],
+        "AWS_SECRET_ACCESS_KEY": creds["SecretAccessKey"],
+        "AWS_SESSION_TOKEN": creds["SessionToken"],
+    }
+    _cred_cache[account_id] = {"env": env, "expiry": creds["Expiration"]}
+    return env
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -39,12 +110,16 @@ def _aws(args: list[str], region: str | None = None, timeout: int = 90) -> Any:
     if region:
         cmd += ["--region", region]
 
+    overrides = _aws_env.get()
+    env = {**os.environ, **overrides} if overrides else None
+
     try:
         proc = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env,
         )
     except subprocess.TimeoutExpired as exc:  # pragma: no cover - env dependent
         raise AwsError(f"`{' '.join(cmd)}` timed out after {timeout}s") from exc
@@ -435,39 +510,54 @@ def scan_region(
     region: str,
     resource_group: str | None = None,
     progress: ProgressCb = None,
+    account_id: str | None = None,
 ) -> dict:
-    """Full scan for one region. Returns the payload handed to the AI analyzer."""
+    """Full scan for one region. Returns the payload handed to the AI analyzer.
+
+    If ``account_id`` is given, every AWS CLI call runs with credentials assumed
+    into that account for the duration of this call.
+    """
 
     def emit(stage: str, message: str, pct: int) -> None:
         if progress:
             progress(stage, message, pct)
 
-    warnings: list[str] = []
+    token = None
+    if account_id:
+        emit("scan", f"Assuming role in account {account_id}...", 12)
+        token = _aws_env.set(_assume_role_env(account_id))
 
-    emit("scan", f"Scanning resources in {region}...", 20)
-    inventory = scan_inventory(region, resource_group, warnings)
-    instances = scan_instances(region, warnings)
-    databases = scan_databases(region, warnings)
+    try:
+        warnings: list[str] = []
 
-    emit("idle", f"Checking for idle resources in {region}...", 35)
-    idle = scan_idle(region, warnings)
+        emit("scan", f"Scanning resources in {region}...", 20)
+        inventory = scan_inventory(region, resource_group, warnings)
+        instances = scan_instances(region, warnings)
+        databases = scan_databases(region, warnings)
 
-    emit("cost", "Fetching spend from Cost Explorer...", 50)
-    cost = scan_cost(warnings)
-    rightsizing = scan_rightsizing(warnings)
-    savings_plans = scan_savings_plans(warnings)
+        emit("idle", f"Checking for idle resources in {region}...", 35)
+        idle = scan_idle(region, warnings)
 
-    return {
-        "region": region,
-        "resource_group": resource_group,
-        "scanned_at": datetime.now(timezone.utc).isoformat(),
-        "resource_count": len(inventory),
-        "resources": inventory,
-        "ec2_instances": instances,
-        "rds_instances": databases,
-        "idle": idle,
-        "cost": cost,
-        "rightsizing": rightsizing,
-        "savings_plans_recommendation": savings_plans,
-        "warnings": warnings,
-    }
+        emit("cost", "Fetching spend from Cost Explorer...", 50)
+        cost = scan_cost(warnings)
+        rightsizing = scan_rightsizing(warnings)
+        savings_plans = scan_savings_plans(warnings)
+
+        return {
+            "region": region,
+            "resource_group": resource_group,
+            "account_id": account_id or None,
+            "scanned_at": datetime.now(timezone.utc).isoformat(),
+            "resource_count": len(inventory),
+            "resources": inventory,
+            "ec2_instances": instances,
+            "rds_instances": databases,
+            "idle": idle,
+            "cost": cost,
+            "rightsizing": rightsizing,
+            "savings_plans_recommendation": savings_plans,
+            "warnings": warnings,
+        }
+    finally:
+        if token is not None:
+            _aws_env.reset(token)

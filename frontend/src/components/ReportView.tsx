@@ -93,6 +93,7 @@ export default function ReportView({ data }: { data: AnalysisResult }) {
           <p className="text-sm text-gray-300">{report.summary}</p>
           <p className="mt-2 text-[11px] text-gray-600">
             {scan.region}
+            {scan.account_id ? ` · account: ${scan.account_id}` : ""}
             {scan.resource_group ? ` · group: ${scan.resource_group}` : ""} ·
             scanned {new Date(scan.scanned_at).toLocaleString()}
             {report.model ? ` · ${report.model}` : ""}

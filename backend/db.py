@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS analyses (
     user_id           BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     region            TEXT NOT NULL,
     resource_group    TEXT,
+    account_id        TEXT,
     resources_scanned INTEGER NOT NULL DEFAULT 0,
     issues_found      INTEGER NOT NULL DEFAULT 0,
     monthly_cost      NUMERIC,
@@ -38,6 +39,9 @@ CREATE TABLE IF NOT EXISTS analyses (
 
 CREATE INDEX IF NOT EXISTS analyses_user_created_idx
     ON analyses (user_id, created_at DESC);
+
+-- Migration for databases created before multi-account support.
+ALTER TABLE analyses ADD COLUMN IF NOT EXISTS account_id TEXT;
 """
 
 
@@ -103,15 +107,22 @@ async def get_user_by_id(user_id: int) -> Optional[asyncpg.Record]:
 
 
 # ── analyses ─────────────────────────────────────────────────────────────────
-async def create_analysis(analysis_id: str, user_id: int, region: str, resource_group: str | None) -> None:
+async def create_analysis(
+    analysis_id: str,
+    user_id: int,
+    region: str,
+    resource_group: str | None,
+    account_id: str | None = None,
+) -> None:
     pool = _require_pool()
     await pool.execute(
-        """INSERT INTO analyses (id, user_id, region, resource_group, status)
-           VALUES ($1, $2, $3, $4, 'running')""",
+        """INSERT INTO analyses (id, user_id, region, resource_group, account_id, status)
+           VALUES ($1, $2, $3, $4, $5, 'running')""",
         analysis_id,
         user_id,
         region,
         resource_group,
+        account_id,
     )
 
 
@@ -156,7 +167,7 @@ async def fail_analysis(analysis_id: str, message: str) -> None:
 async def list_analyses(user_id: int) -> list[dict]:
     pool = _require_pool()
     rows = await pool.fetch(
-        """SELECT id, region, resource_group, resources_scanned, issues_found,
+        """SELECT id, region, resource_group, account_id, resources_scanned, issues_found,
                   monthly_cost, estimated_savings, status, error, created_at
              FROM analyses
             WHERE user_id = $1
@@ -170,7 +181,7 @@ async def list_analyses(user_id: int) -> list[dict]:
 async def get_analysis(analysis_id: str, user_id: int) -> Optional[dict]:
     pool = _require_pool()
     row = await pool.fetchrow(
-        """SELECT id, region, resource_group, resources_scanned, issues_found,
+        """SELECT id, region, resource_group, account_id, resources_scanned, issues_found,
                   monthly_cost, estimated_savings, analysis_result, status, error, created_at
              FROM analyses
             WHERE id = $1 AND user_id = $2""",
@@ -185,6 +196,16 @@ async def get_analysis(analysis_id: str, user_id: int) -> Optional[dict]:
         result = json.loads(result)
     d["analysis_result"] = result
     return d
+
+
+async def analysis_exists_for_user(analysis_id: str, user_id: int) -> bool:
+    pool = _require_pool()
+    val = await pool.fetchval(
+        "SELECT 1 FROM analyses WHERE id = $1 AND user_id = $2",
+        analysis_id,
+        user_id,
+    )
+    return val is not None
 
 
 def _row_to_dict(r: asyncpg.Record) -> dict:

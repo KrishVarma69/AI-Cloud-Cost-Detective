@@ -17,9 +17,12 @@ export type Report = {
 
 export type CostByService = { service: string; amount: number };
 
+export type Account = { id: string; label: string };
+
 export type Scan = {
   region: string;
   resource_group: string | null;
+  account_id?: string | null;
   resource_count: number;
   scanned_at: string;
   cost: {
@@ -42,6 +45,7 @@ export type HistoryRow = {
   id: string;
   region: string;
   resource_group: string | null;
+  account_id?: string | null;
   resources_scanned: number;
   issues_found: number;
   monthly_cost: number | null;

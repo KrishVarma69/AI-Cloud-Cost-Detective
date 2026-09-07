@@ -1,0 +1,59 @@
+{
+  "family": "cost-detective-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "executionRoleArn": "arn:aws:iam::HUB_ACCOUNT_ID:role/CostDetectiveExecutionRole",
+  "taskRoleArn": "arn:aws:iam::HUB_ACCOUNT_ID:role/CostDetectiveTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "backend",
+      "image": "HUB_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/cost-detective-backend:latest",
+      "essential": true,
+      "portMappings": [
+        { "containerPort": 8000, "protocol": "tcp" }
+      ],
+      "environment": [
+        { "name": "APP_ENV", "value": "production" },
+        { "name": "LLM_PROVIDER", "value": "bedrock" },
+        { "name": "BEDROCK_MODEL_ID", "value": "anthropic.claude-3-5-sonnet-20241022-v2:0" },
+        { "name": "BEDROCK_REGION", "value": "us-east-1" },
+        { "name": "AWS_REGION", "value": "us-east-1" },
+        { "name": "FRONTEND_ORIGIN", "value": "https://cost-detective.example.com" },
+        { "name": "ALLOW_SIGNUP", "value": "false" },
+        { "name": "SIGNUP_ALLOWED_DOMAINS", "value": "" },
+        { "name": "ANALYZE_RATE_LIMIT_PER_HOUR", "value": "20" },
+        { "name": "ANALYZE_MAX_CONCURRENT_PER_USER", "value": "2" },
+        { "name": "JWT_TTL_DAYS", "value": "7" },
+        { "name": "CROSS_ACCOUNT_ROLE_NAME", "value": "CostDetectiveScanRole" },
+        { "name": "SCAN_ACCOUNTS", "value": "" }
+      ],
+      "secrets": [
+        { "name": "JWT_SECRET", "valueFrom": "arn:aws:secretsmanager:us-east-1:HUB_ACCOUNT_ID:secret:cost-detective/jwt-secret" },
+        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:HUB_ACCOUNT_ID:secret:cost-detective/database-url" },
+        { "name": "CROSS_ACCOUNT_EXTERNAL_ID", "valueFrom": "arn:aws:secretsmanager:us-east-1:HUB_ACCOUNT_ID:secret:cost-detective/cross-account-external-id" }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 20
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/cost-detective-backend",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "backend",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}
