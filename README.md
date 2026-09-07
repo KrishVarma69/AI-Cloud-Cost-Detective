@@ -17,7 +17,7 @@ An AI-powered tool that investigates AWS cloud costs automatically. It scans res
 | Auth | Custom JWT Auth (bcrypt + PyJWT) |
 | Cloud Data | AWS CLI (Resource Groups Tagging API + Cost Explorer) |
 | Cloud | AWS |
-| AI Analysis | OpenAI API |
+| AI Analysis | OpenAI API *or* Amazon Bedrock (`LLM_PROVIDER`) |
 | Database | Amazon RDS for PostgreSQL |
 | Live Updates | FastAPI WebSocket |
 
@@ -114,7 +114,18 @@ An AI-powered tool that investigates AWS cloud costs automatically. It scans res
 
 ## How to Run
 
-### Backend
+### Docker (whole stack)
+
+```bash
+cp backend/.env.example backend/.env   # set JWT_SECRET + LLM settings
+docker compose up --build
+```
+
+Frontend on `http://localhost:8080`, backend on `http://localhost:8000`. AWS
+credentials are read from your shell env (`AWS_ACCESS_KEY_ID` / …) or from a
+`~/.aws` bind mount you uncomment in `docker-compose.yml`.
+
+### Backend (local)
 
 ```bash
 cd backend
@@ -123,7 +134,7 @@ cp .env.example .env   # fill in your credentials
 uvicorn main:app --reload
 ```
 
-### Frontend
+### Frontend (local)
 
 ```bash
 cd frontend
@@ -131,11 +142,30 @@ npm install
 npm run dev
 ```
 
+## Configuration
+
+Key environment variables (see `backend/.env.example` for the full list):
+
+| Var | Purpose |
+|---|---|
+| `APP_ENV` | `development` / `production`. In `production` the app refuses to start with a default `JWT_SECRET` or a localhost `FRONTEND_ORIGIN`. |
+| `LLM_PROVIDER` | `openai` (default) or `bedrock`. Bedrock keeps the scan payload inside your AWS account. |
+| `BEDROCK_MODEL_ID` / `BEDROCK_REGION` | Model + region when `LLM_PROVIDER=bedrock`. |
+| `ALLOW_SIGNUP` | Set `false` to disable self-service signup. |
+| `SIGNUP_ALLOWED_DOMAINS` | Optional comma-separated email-domain allowlist for signup. |
+| `FRONTEND_ORIGIN` | Comma-separated list of allowed browser origins (CORS). |
+| `ANALYZE_RATE_LIMIT_PER_HOUR` / `ANALYZE_MAX_CONCURRENT_PER_USER` | Per-user analyze limits (per backend process). |
+| `SCAN_ACCOUNTS` | Multi-account: `"<id>:<label>,…"` accounts shown in the UI picker. Empty = current account only. |
+| `CROSS_ACCOUNT_ROLE_NAME` / `CROSS_ACCOUNT_EXTERNAL_ID` | Role assumed in each target account, and its trust-policy external id. |
+
+The `/ws/progress/{id}` WebSocket requires a valid JWT (`?token=…`) and only
+streams analyses owned by that user.
+
 ## How It Works
 
 1. User signs up / logs in via custom JWT auth (credentials stored in RDS PostgreSQL)
-2. Selects an AWS Region (and optionally an AWS Resource Group) to analyze
-3. Python backend fetches all resources using the AWS CLI (Resource Groups Tagging API) and real spend from AWS Cost Explorer
+2. Selects an AWS Region (and optionally an AWS Resource Group, and — if `SCAN_ACCOUNTS` is configured — a target account) to analyze
+3. Python backend fetches all resources using the AWS CLI (Resource Groups Tagging API) and real spend from AWS Cost Explorer. For a non-default account it first assumes `CostDetectiveScanRole` there.
 4. Live progress is streamed to the UI via FastAPI WebSocket
 5. Resource + cost data is sent to OpenAI API for cost analysis
 6. Analysis results are stored in RDS PostgreSQL
@@ -143,7 +173,10 @@ npm run dev
 
 ## IAM Permissions
 
-The credentials used by the backend need a read-only policy. A minimal set:
+Ready-to-apply policy documents and setup commands (single-account and
+multi-account / AWS Organizations) are in [`infra/iam/`](infra/iam/); ECS/Fargate
+task definitions are in [`infra/ecs/`](infra/ecs/). The credentials used by the
+backend need a read-only policy. A minimal set:
 
 ```
 tag:GetResources
